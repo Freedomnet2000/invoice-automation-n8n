@@ -1,0 +1,29 @@
+# Runs the extraction API (project 1) and n8n side by side.
+# Expects the invoice-extractor project in a sibling folder: ../invoice-extractor
+services:
+  invoice-extractor:
+    build: ../invoice-extractor
+    env_file: ../invoice-extractor/.env
+    ports:
+      - "8000:8000"
+    restart: unless-stopped
+
+  n8n:
+    image: n8nio/n8n:latest
+    ports:
+      - "5678:5678"
+    environment:
+      - GENERIC_TIMEZONE=Asia/Jerusalem
+      - TZ=Asia/Jerusalem
+      - INVOICE_EXTRACTOR_URL=http://invoice-extractor:8000
+      # lets the workflow read INVOICE_EXTRACTOR_URL via $env
+      - N8N_BLOCK_ENV_ACCESS_IN_NODE=false
+    volumes:
+      - n8n_data:/home/node/.n8n
+      - ./workflows:/workflows:ro
+    depends_on:
+      - invoice-extractor
+    restart: unless-stopped
+
+volumes:
+  n8n_data:

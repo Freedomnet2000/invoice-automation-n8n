@@ -1,0 +1,345 @@
+{
+  "id": "InvoicePipeline1",
+  "name": "Invoice Pipeline: Email/Form → AI Extraction → Google Sheets → Slack",
+  "nodes": [
+    {
+      "parameters": {
+        "pollTimes": {
+          "item": [
+            {
+              "mode": "everyMinute"
+            }
+          ]
+        },
+        "simple": false,
+        "filters": {
+          "q": "has:attachment (filename:pdf OR filename:png OR filename:jpg) subject:invoice"
+        },
+        "options": {
+          "downloadAttachments": true
+        }
+      },
+      "id": "a1f0c2d4-0001-4c1a-9a01-000000000001",
+      "name": "Gmail: new invoice email",
+      "type": "n8n-nodes-base.gmailTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        0,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "formTitle": "Upload an invoice",
+        "formDescription": "PDF, PNG or JPG. Hebrew or English.",
+        "formFields": {
+          "values": [
+            {
+              "fieldLabel": "invoice",
+              "fieldType": "file",
+              "multipleFiles": false,
+              "acceptFileTypes": ".pdf,.png,.jpg,.jpeg,.webp",
+              "requiredField": true
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "a1f0c2d4-0002-4c1a-9a01-000000000002",
+      "name": "Form: manual upload",
+      "type": "n8n-nodes-base.formTrigger",
+      "typeVersion": 2.2,
+      "position": [
+        0,
+        220
+      ],
+      "webhookId": "7c1d2e3f-0002-4b5a-8c9d-0000000000a2"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.INVOICE_EXTRACTOR_URL || 'http://invoice-extractor:8000' }}/extract",
+        "sendBody": true,
+        "contentType": "multipart-form-data",
+        "bodyParameters": {
+          "parameters": [
+            {
+              "parameterType": "formBinaryData",
+              "name": "file",
+              "inputDataFieldName": "={{ Object.keys($binary)[0] }}"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 120000
+        }
+      },
+      "id": "a1f0c2d4-0003-4c1a-9a01-000000000003",
+      "name": "Extract invoice data (FastAPI)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        260,
+        110
+      ]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "f-01",
+              "name": "received_at",
+              "value": "={{ $now.toISO() }}",
+              "type": "string"
+            },
+            {
+              "id": "f-02",
+              "name": "vendor",
+              "value": "={{ $json.invoice.vendor_name }}",
+              "type": "string"
+            },
+            {
+              "id": "f-03",
+              "name": "vendor_tax_id",
+              "value": "={{ $json.invoice.vendor_tax_id }}",
+              "type": "string"
+            },
+            {
+              "id": "f-04",
+              "name": "invoice_number",
+              "value": "={{ $json.invoice.invoice_number }}",
+              "type": "string"
+            },
+            {
+              "id": "f-05",
+              "name": "invoice_date",
+              "value": "={{ $json.invoice.invoice_date }}",
+              "type": "string"
+            },
+            {
+              "id": "f-06",
+              "name": "currency",
+              "value": "={{ $json.invoice.currency }}",
+              "type": "string"
+            },
+            {
+              "id": "f-07",
+              "name": "subtotal",
+              "value": "={{ $json.invoice.subtotal }}",
+              "type": "number"
+            },
+            {
+              "id": "f-08",
+              "name": "vat",
+              "value": "={{ $json.invoice.vat_amount }}",
+              "type": "number"
+            },
+            {
+              "id": "f-09",
+              "name": "total",
+              "value": "={{ $json.invoice.total_amount }}",
+              "type": "number"
+            },
+            {
+              "id": "f-10",
+              "name": "status",
+              "value": "={{ $json.warnings.length === 0 ? 'OK' : 'NEEDS REVIEW' }}",
+              "type": "string"
+            },
+            {
+              "id": "f-11",
+              "name": "warnings",
+              "value": "={{ $json.warnings.join('; ') }}",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "a1f0c2d4-0004-4c1a-9a01-000000000004",
+      "name": "Map to sheet row",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        520,
+        110
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "value": "",
+          "mode": "url"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "Invoices",
+          "mode": "name"
+        },
+        "columns": {
+          "mappingMode": "autoMapInputData",
+          "value": {},
+          "matchingColumns": [],
+          "schema": []
+        },
+        "options": {}
+      },
+      "id": "a1f0c2d4-0005-4c1a-9a01-000000000005",
+      "name": "Google Sheets: append row",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        780,
+        110
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "c-01",
+              "leftValue": "={{ $('Map to sheet row').item.json.status }}",
+              "rightValue": "NEEDS REVIEW",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "a1f0c2d4-0006-4c1a-9a01-000000000006",
+      "name": "Needs review?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        1040,
+        110
+      ]
+    },
+    {
+      "parameters": {
+        "select": "channel",
+        "channelId": {
+          "__rl": true,
+          "value": "#invoices",
+          "mode": "name"
+        },
+        "text": "=:warning: Invoice needs review\n*Vendor:* {{ $('Map to sheet row').item.json.vendor }}\n*Invoice #:* {{ $('Map to sheet row').item.json.invoice_number }}\n*Total:* {{ $('Map to sheet row').item.json.total }} {{ $('Map to sheet row').item.json.currency }}\n*Issues:* {{ $('Map to sheet row').item.json.warnings }}",
+        "otherOptions": {
+          "includeLinkToWorkflow": false
+        }
+      },
+      "id": "a1f0c2d4-0007-4c1a-9a01-000000000007",
+      "name": "Slack: alert",
+      "type": "n8n-nodes-base.slack",
+      "typeVersion": 2.2,
+      "position": [
+        1300,
+        20
+      ]
+    },
+    {
+      "parameters": {},
+      "id": "a1f0c2d4-0008-4c1a-9a01-000000000008",
+      "name": "Done",
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [
+        1300,
+        200
+      ]
+    }
+  ],
+  "connections": {
+    "Gmail: new invoice email": {
+      "main": [
+        [
+          {
+            "node": "Extract invoice data (FastAPI)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Form: manual upload": {
+      "main": [
+        [
+          {
+            "node": "Extract invoice data (FastAPI)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract invoice data (FastAPI)": {
+      "main": [
+        [
+          {
+            "node": "Map to sheet row",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Map to sheet row": {
+      "main": [
+        [
+          {
+            "node": "Google Sheets: append row",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Google Sheets: append row": {
+      "main": [
+        [
+          {
+            "node": "Needs review?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Needs review?": {
+      "main": [
+        [
+          {
+            "node": "Slack: alert",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Done",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "pinData": {},
+  "active": false
+}
